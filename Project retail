@@ -1,0 +1,485 @@
+sqoop --options-file /home/hduser/retailorders/ordersoption --P --boundary-query "select min(customernumber),max(customernumber) from orders" --query 'select o.customernumber,o.ordernumber,o.orderdate,o.shippeddate,o.status,o.comments,od.productcode,od.quantityordered,od.priceeach,od.orderlinenumber,p.productCode,p.productname,p.productline,p.productscale,p.productvendor,p.productdescription,p.quantityinstock,p.buyprice,p.msrp from orders o inner join orderdetails od on o.ordernumber=od.ordernumber inner join products p on p.productcode=od.productcode and year(o.orderdate)=2020 and month(o.orderdate)=10 where $CONDITIONS' --split-by o.customernumber --delete-target-dir --target-dir orderdetails/2020-10/ --null-string 'NA' --direct --num-mappers 4 --fields-terminated-by '~' --lines-terminated-by '\n';
+
+
+
+sqoop --options-file /home/hduser/retailorders/ordersoption --P --boundary-query "select min(customerNumber),max(customerNumber) from orders" --query 'select o.customernumber,o.ordernumber,o.orderdate,o.shippeddate,o.status,o.comments,od.quantityordered,od.priceeach,od.orderlinenumber,p.productCode,p.productName,p.productLine,p.productScale,p.productVendor,p.productDescription,p.quantityInStock,p.buyPrice,p.MSRP from orders o inner join orderdetails od on o.ordernumber=od.ordernumber inner join products p on od.productCode=p.productCode and year(o.orderdate)=2020 and month(o.orderdate)=10 where $CONDITIONS' --split-by o.customernumber --delete-target-dir --target-dir orderdetails/2020-10/ --null-string 'NA' --direct --num-mappers 4 --fields-terminated-by '~' --lines-terminated-by '\n';
+
+
+
+########Performing hive queries#################
+
+col_name	data_type	comment
+cno                 	string              	                    
+name                	string              	                    
+fname               	string              	                    
+lname               	string              	                    
+phone               	bigint              	                    
+address             	string              	                    
+city                	string              	                    
+state               	string              	                    
+pin                 	string              	                    
+country             	string              	                    
+empnum              	string              	                    
+credlim             	string              	                    
+cheqnum             	string              	                    
+dt                  	date                	                    
+cheqamt             	string   
+
+insert overwrite table custstg select cno,name,concat(fname,' ',lname),named_struct('add1',address,'city',city,'state',state,'pin',pin,'country',country,'phone',phone),credlim,cheqnum,cheqamt,dt from custdetails_raw;
+
+
+
+
+create external table custstgcured(cno string,name string,fullname string,address struct<add1:string,city:string,state:string,pin:string,country:string,phone:bigint>,credlim string,cheqnum string,cheqamt string,paymentdt date) row format delimited fields terminated by '~' stored as textfile;
+
+
+cno                 	string              	                    
+name                	string              	                    
+fname               	string              	                    
+lname               	string              	                    
+phone               	bigint              	                    
+address             	string              	                    
+city                	string              	                    
+state               	string              	                    
+pin                 	string              	                    
+country             	string              	                    
+empnum              	string              	                    
+credlim             	string              	                    
+cheqnum             	string              	                    
+dt                  	date                	                    
+cheqamt             	string  
+
+
+
+insert overwrite table custstgcured select coalesce(cno,0),name,concat(fname,' ',lname),named_struct('add1',address,'city',city,'state',state,'pin',pin,'country',country,'phone',phone),round(credlim),
+concat(REGEXP_EXTRACT(cheqnum,'[A-Z]+',0),'-',REGEXP_EXTRACT(cheqnum,'[0-9]+',0)),round(cheqamt),coalesce(dt,current_date) from retailstg.custdetails_raw where credlim>=cheqamt;
+
+
+###FROM RETAILSTG.CUSTSTG#####
+cno                 	string              	                    
+cname               	string              	                    
+fullname            	string              	                    
+address             	struct<add1:string,city:string,state:string,pin:string,country:string,phone:bigint>	                    
+credlim             	string              	                    
+cheqno              	string              	                    
+cheqamt             	string              	                    
+paydt               	date     
+
+####CREATING EXTERNAL TABLE WITH PARTITION AND BUCKETING#######
+create external table custpartbuck (cno string,cname string,fullname string,address struct<add1:string,city:string,state:string,pin:string,country:string,phone:bigint>,credlim string,cheqnum string,cheqamt string) partitioned by (paymentdt date) clustered by (cno) into 3 buckets row format delimited fields terminated by '~' collection items terminated by '$' stored as textfile location '/user/hduser/custorders/custpartbuck';
+
+#####CREATING EXTERNAL TABLE WITH ONLY PARTITION NOT BUCKETING AND STORING AS ORC FILE#######
+create external table custpart (cno string,cname string,fullname string,address struct<add1:string,city:string,state:string,pin:string,country:string,phone:bigint>,credlim string,cheqnum string,cheqamt string) partitioned by (paymentdt date) row format delimited fields terminated by '~' stored as orc location '/user/hduser/custorders/custpart';
+
+
+insert overwrite table custpartbuck partition(paymentdt) select cno,cname,fullname,address,credlim,cheqno,cheqamt,paydt from retailstg.custstg;
+
+
+insert overwrite table custpart partition(paymentdt) select cno,cname,fullname,address,credlim,cheqno,cheqamt,paydt from retailstg.custstg;
+
+
+###FROM RETAILSTG.ORDSTG
+cno                 	string              	                    
+ordno               	string              	                    
+dt                  	date                	                    
+shipdt              	date                	                    
+stat                	string              	                    
+comm                	string              	                    
+quaord              	string              	                    
+priz                	decimal(10,2)       	                    
+ordline             	string              	                    
+code                	string              	                    
+prodname            	string              	                    
+prodline            	string              	                    
+scale               	string              	                    
+vend                	string              	                    
+descrip             	string              	                    
+instok              	string              	                    
+buy                 	decimal(10,2)       	                    
+msrp                	decimal(10,2) 
+
+
+####CREATING EXTERNAL TABLE WITH PARTITION AND BUCKETING#######
+create external table ordpartbuck (cno string,ordno string,shipdt date,status string,comments string,prodcode string,quantityord string,priceeach decimal(10,2),ordlineno string,prodname string,prodline string,prodscale string,prodvendor string,proddesc string,prodinstock string,buyprice decimal(10,2),MSRP decimal(10,2)) partitioned by (orderdate date) clustered by (cno) into 3 buckets 
+row format delimited fields terminated by '~' collection items terminated by '$' stored as textfile location '/user/hduser/ordpartbuck';
+
+
+#####CREATING EXTERNAL TABLE WITH ONLY PARTITION NOT BUCKETING AND STORING AS ORC FILE#######
+create external table ordpart (cno string,ordno string,shipdt date,status string,comments string,prodcode string,quantityord string,priceeach decimal(10,2),ordlineno string,prodname string,prodline string,prodscale string,prodvendor string,proddesc string,prodinstock string,buyprice decimal(10,2),MSRP decimal(10,2)) partitioned by (orderdate date) row format delimited fields terminated by '~' stored as orc location '/user/hduser/ordpart';
+
+
+insert overwrite table ordpartbuck partition(orderdate) select cno,ordno,shipdt,stat,comm,code,quaord,priz,ordline,prodname,prodline,scale,vend,descrip,instok,buy,msrp,dt from retailstg.ordstg;
+
+insert overwrite table ordpart partition(orderdate) select cno,ordno,shipdt,stat,comm,code,quaord,priz,ordline,prodname,prodline,scale,vend,descrip,instok,buy,msrp,dt from retailstg.ordstg;
+
+##########FROM PROJ_RETAIL_CURATED.CUSTPARTBUCK#############
+cno                 	string              	                    
+cname               	string              	                    
+fullname            	string              	                    
+address             	struct<add1:string,city:string,state:string,pin:string,country:string,phone:bigint>	                    
+credlim             	string              	                    
+cheqnum             	string              	                    
+cheqamt             	string              	                    
+paymentdt           	date   
+
+##########FROM PROJ_RETAIL_CURATED.ORDPARTBUCK#############
+cno                 	string              	                    
+ordno               	string              	                    
+shipdt              	date                	                    
+status              	string              	                    
+comments            	string              	                    
+prodcode            	string              	                    
+quantityord         	string              	                    
+priceeach           	decimal(10,2)       	                    
+ordlineno           	string              	                    
+prodname            	string              	                    
+prodline            	string              	                    
+prodscale           	string              	                    
+prodvendor          	string              	                    
+proddesc            	string              	                    
+prodinstock         	string              	                    
+buyprice            	decimal(10,2)       	                    
+msrp                	decimal(10,2)       	                    
+orderdate           	date 
+
+
+############CREATING A FINAL EXTERNAL TABLE BY JOINING BOTH THE ABOVE TABLES WITH ONLY PARTITION AND STORING AS ORC############
+create external table custordpartfinal (cno string,cname string,fullname string,phone bigint,credlim string,cheqnum string,cheqamt string,ordno string,shipdt date,status string,comments string,prodcode string,
+quantityord string,priceeach decimal(10,2),ordlineno string,prodname string,prodline string,prodscale string,prodvendor string,proddesc string,prodinstock string,buyprice decimal(10,2),MSRP decimal(10,2),orderdt date) partitioned by(paymentdt date) row format delimited fields terminated by '~' stored as orc location '/user/hduser/custorders/custordpartfinal';
+
+create index idx_custordpartfinal_phone on table custordpartfinal(phone) AS 'org.apache.hadoop.hive.ql.index.compact.CompactIndexHandler' WITH DEFERRED REBUILD;
+
+insert into custordpartfinal partition (paymentdt) select c.cno,c.cname,c.fullname,c.address.phone,c.credlim,c.cheqnum,c.cheqamt,o.ordno,o.shipdt,o.status,o.comments,o.prodcode,o.quantityord,
+o.priceeach,o.ordlineno,o.prodname,o.prodline,o.prodscale,o.prodvendor,o.proddesc,o.prodinstock,o.buyprice,o.msrp,o.orderdate,c.paymentdt from proj_retail_curated.custpartbuck c inner join proj_retail_curated.ordpartbuck o on c.cno=o.cno;
+
+
+########CUSTOMER WEBSITE VIEWSHIP PATTERN AND FRUSTRATION SCORING USE CASE########
+
+###PREPARING DATA###
+hadoop fs -mkdir -p /user/hduser/retailorders/dimorders
+dfs -put -f /home/hduser/retailorders/orders_rate.csv /user/hduser/retailorders/dimorders/orders_rate.csv
+
+
+##########CREATING TABLE IN PROJ_RETAIL_DISCOVERY DATABASE ON TOP OF THE FILE##############
+create external table dim_order_rate(rateid string,descrip string,cc string,severity string,intent string) row format delimited fields terminated by ',' location '/user/hduser/retailorders/dimorders/';
+
+###############CREATING TABLE IN RETAILSTG DATABASE#############
+create table cust_navi(cno string,comm string,pgnavi array<string>,pgnaviid array<int>) row format delimited fields terminated by ',' collection items terminated by '$'; 
+
+load data local inpath '/home/hduser/retailorders/cust_visits.csv' overwrite into table cust_navi;
+
+#############CREATING TABLE IN PROJ_RETAIL_DISCOVERY##############
+create table cust_navi_disc(cno string,navi_index string,navi_page string) row format delimited fields terminated by ',' location '/user/hduser/custnavigation/';
+
+insert into cust_navi_disc select cno,idx,navi from retailstg.cust_navi lateral view posexplode(pgnavi) view as idx,navi;
+ 	
+########BELOW SELECT QUERY USING THE ANALYTICAL FUNCTIONS PROVIDES THE REVERSE ORDERING OF THE PAGE NAVIGATION FROM HIGHER VALUE TO LOW##########
+
+
+##################WHAT IS THE FIRST AND LAST PAGE VISITED AND THE COUNT OF VISITS######################
+select c1.navigation_pg,count(distinct c1.customernumber) custcnt,'last pagevisited' pagevisit
+from retail_discovery.cust_navigation c1 inner join (select a.customernumber,max(a.navigation_index) as
+maxnavigation from retail_discovery.cust_navigation a group by a.customernumber) as c2 on
+(c1.customernumber=c2.customernumber and c1.navigation_index=c2.maxnavigation) group by
+c1.navigation_pg
+union all
+select navigation_pg,count(distinct customernumber) custcnt,'first pagevisited' pagevisit
+from retail_discovery.cust_navigation
+where navigation_index=0
+group by navigation_pg;
+
+desc retailstg.cust_navi;
+col_name	data_type	comment
+cno                 	string              	                    
+comm                	string              	                    
+pgnavi              	array<string>       	                    
+pgnaviid            	array<int> 
+
+desc cust_navi_disc;
+col_name	data_type	comment
+cno                 	string              	                    
+navi_index          	string              	                    
+navi_page           	string 
+
+##############select navi_page,count(distinct cno) custcnt, 'last pagevisited' pagevisit from cust_navi_disc##########
+navi_page	custcnt	pagevisit
+about-us	26	last pagevisited
+adv-banner114	2	last pagevisited
+adv-banner117	19	last pagevisited
+billing	5	last pagevisited
+cart	45	last pagevisited
+exit	47	last pagevisited
+google-search	5	last pagevisited
+home	46	last pagevisited
+order	18	last pagevisited
+profile	26	last pagevisited
+
+
+#########select cno,max(navi_index) as max_navi from cust_navi_disc a group by cno############
+cno	max_navi
+112	5
+114	5
+124	5
+128	4
+131	3
+141	5
+144	2
+145	5
+148	5
+151	1
+167	5
+171	5
+172	5
+173	5
+175	5
+186	3
+189	3
+201	3
+202	3
+205	3
+216	3
+240	3
+242	3
+250	3
+259	3
+276	3
+278	3
+282	3
+286	3
+299	3
+319	3
+323	3
+328	3
+339	4
+357	4
+362	4
+363	4
+450	4
+452	5
+456	4
+471	4
+473	5
+475	4
+484	4
+486	5
+495	5
+496	5
+
+
+##########select navi_page,count(distinct cno) custcnt, 'first pagevisited' pagevisit from cust_navi_disc group by navi_page;############
+about-us	26	first pagevisited
+adv-banner114	2	first pagevisited
+adv-banner117	19	first pagevisited
+billing	5	first pagevisited
+cart	45	first pagevisited
+exit	47	first pagevisited
+google-search	5	first pagevisited
+home	46	first pagevisited
+order	18	first pagevisited
+profile	26	first pagevisited
+
+###################FILTERING ONLY NAVI_INDEX=0#########################
+############select navi_page,count(distinct cno) custcnt, 'first pagevisited' pagevisit from cust_navi_disc where navi_index=0 group by navi_page;########################
+navi_page	custcnt	pagevisit
+google-search	5	first pagevisited
+home	46	first pagevisited
+
+###############FINAL QUERY###################
+select c1.navi_page,count(distinct c1.cno) custcnt, 'last pagevisited' pagevisit from proj_retail_discovery.cust_navi_disc c1 inner join (select a.cno,max(a.navi_index) as max_navi from cust_navi_disc a group by a.cno) as c2 on (c1.cno=c2.cno and c1.navi_index=c2.max_navi) group by c1.navi_page union all select navi_page,count(distinct cno) custcnt, 'first pagevisited' pagevisit from cust_navi_disc where navi_index=0 group by navi_page;
+
+
+###########FINAL OUTPUT(WHAT IS THE FIRST AND LAST PAGE VISITED AND THE COUNT OF VISITS)#############
+_u1.navi_page	_u1.custcnt	_u1.pagevisit
+google-search	5	first pagevisited
+home	46	first pagevisited
+exit	46	last pagevisited
+order	1	last pagevisited
+
+###############WHAT IS THE MOST VISITED PAGE####################
+select navi_page,count(cno) as custcnt from cust_navi_disc group by navi_page order by custcnt desc limit 1;
+
+################OUTPUT########################
+exit	72
+home	63
+cart	62
+about-us	33
+profile	32
+adv-banner117	27
+order	20
+google-search	10
+billing	10
+adv-banner114	2
+
+
+#############IDENTIFYING FRUSTRATION LEVEL OF CUSTOMER###############
+create external table cust_frustrate(cno string,total_sev string,frus_level string) row format delimited fields terminated by ',' location '/user/hduser/custmartfrustration/';
+
+##################QUERY TABLE#####################
+select c.cno,c.comm,o.descrip,o.severity from retailstg.cust_navi c left outer join proj_retail_discovery.dim_order_rate o where c.comm like concat('%',o.descrip,'%');
+
+################QUERY OUTPUT##############
+c.cno	c.comm	o.descrip	o.severity
+112	Customer very concerned about the exact color of the models. There is high risk that he may dispute the order because there is a slight color mismatch	concerned	-4
+114	Can we deliver the new Ford Mustang models by end-of-quarter?	deliver	0
+124	Custom shipping instructions were sent to warehouse	shipping	0
+124	They want to reevaluate their terms agreement with Finance.	reevaluate	3
+128	Customer very concerned about the exact color of the models. There is high risk that he may dispute the order because there is a slight color mismatch	concerned	-4
+131	Difficult to negotiate with customer. We need more marketing materials	Difficult	-3
+131	Order was mistakenly placed. The warehouse noticed the lack of documentation.	mistake	1
+131	They want to reevaluate their terms agreement with Finance.	reevaluate	3
+141	Customer requested that DHL is used for this shipping	shipping	0
+141	Customer requested that DHL is used for this shipping	requested	3
+141	Difficult to negotiate with customer. We need more marketing materials	Difficult	-3
+141	This customer found a better offer from one of our competitors. Will call back to renegotiate.	better offer	-1
+141	This customer found a better offer from one of our competitors. Will call back to renegotiate.	renegotiate	1
+144	Customer requested that ad materials (such as posters pamphlets) be included in the shippment	requested	3
+145	Customer claims container with shipment was damaged during shipping and some items were missing. I am talking to FedEx about this.	shipping	0
+145	Customer claims container with shipment was damaged during shipping and some items were missing. I am talking to FedEx about this.	claims	4
+148	They want to reevaluate their terms agreement with Finance.	reevaluate	3
+148	We need to keep in close contact with their Marketing VP. He is the decision maker for all their purchases.	purchase	1
+151	Customer requested special shippment. The instructions were passed along to the warehouse	requested	3
+167	We need to keep in close contact with their Marketing VP. He is the decision maker for all their purchases.	purchase	1
+172	Customer requested that DHL is used for this shipping	shipping	0
+172	Customer requested that DHL is used for this shipping	requested	3
+173	Can we deliver the new Ford Mustang models by end-of-quarter?	deliver	0
+175	Customer requested that DHL is used for this shipping	shipping	0
+175	Customer requested that DHL is used for this shipping	requested	3
+201	Customer disputed the order and we agreed to cancel it. We must be more cautions with this customer going forward  since they are very hard to please. We must cover the shipping fees.	disputed	-5
+201	Customer disputed the order and we agreed to cancel it. We must be more cautions with this customer going forward  since they are very hard to please. We must cover the shipping fees.	shipping	0
+202	Can we renegotiate this one?	renegotiate	1
+202	Customer requested that FedEx Ground is used for this shipping	shipping	0
+
+
+
+#########QUERY TABLE#############
+(select cno,sum(severity) as total_severity from (select c.cno,c.comm,o.descrip,o.severity from retailstg.cust_navi c left outer join proj_retail_discovery.dim_order_rate o where c.comm like concat('%',o.descrip,'%')) temp1 group by cno) temp2;
+
+##########QUERY OUTPUT##############
+cno	total_severity
+112	-4.0
+114	0.0
+124	3.0
+128	-4.0
+131	1.0
+141	0.0
+144	3.0
+145	4.0
+148	4.0
+151	3.0
+167	1.0
+172	3.0
+173	0.0
+175	3.0
+201	-5.0
+202	4.0
+205	-2.0
+216	5.0
+240	3.0
+242	5.0
+276	3.0
+278	-4.0
+282	1.0
+299	0.0
+319	3.0
+323	6.0
+328	3.0
+339	1.0
+357	-4.0
+362	3.0
+450	3.0
+452	-5.0
+456	8.0
+471	4.0
+473	3.0
+475	3.0
+486	6.0
+496	-2.0
+
+#####################FINAL QUERY############################
+insert into cust_frustrate select cno,total_severity,case when total_severity between -10 and -3 then 'highly frustrated' when total_severity between -2 and -1 then 'low frustrated' when total_severity=0 then 'neutral' when total_severity between 1 and 2 then 'happy' when total_severity between 3 and 10 then 'overwhelming' else 'unknown' end as customer_frustration_level from (select cno,sum(severity) as total_severity from (select c.cno,c.comm,o.descrip,o.severity from retailstg.cust_navi c left outer join proj_retail_discovery.dim_order_rate o where c.comm like concat('%',o.descrip,'%')) temp1 group by cno) temp2;
+
+##############SAMPLE FINAL OUTPUT#################
+select * from cust_frustrate limit 10;
+OK
+cust_frustrate.cno	cust_frustrate.total_sev	cust_frustrate.frus_level
+112	-4.0	highly frustrated
+114	0.0	neutral
+124	3.0	overwhelming
+128	-4.0	highly frustrated
+131	1.0	happy
+141	0.0	neutral
+144	3.0	overwhelming
+145	4.0	overwhelming
+148	4.0	overwhelming
+151	3.0	overwhelming
+
+##############PREPARATION ----- CREATING TABLE AND LOADING DATA##################
+create table retailstg.stopwords (words string);
+load data local inpath '/home/hduser/retailorders/stopwords' overwrite into table retailstg.stopwords;
+
+
+##############PERFORMING QUERY###############
+select splitwords,count(*) as cnt from (select cno,word as splitwords from retailstg.cust_navi lateral view explode(split(comm,' '))w as word) as q1 where upper(splitwords) not in (select upper(words) from retailstg.stopwords) group by splitwords order by cnt desc;
+
+################SAMPLE QUERY OUTPUT##############
+splitwords	cnt
+requested	16
+shipping	16
+order	8
+warehouse	8
+models.	8
+models	8
+reevaluate	7
+Finance.	7
+terms	7
+agreement	7
+instructions	6
+color	6
+DHL	6
+credit	5
+payment	5
+FedEx	5
+customer.	5
+materials	5
+exceeded.	4
+received.	4
+information	4
+limit	4
+Ground	4
+Sales	4
+ship	4
+cautions	4
+customers	4
+(such	3
+worked	3
+vendors	3
+stocked.	3
+special	3
+slight	3
+shippments	3
+shippment.	3
+shippment	3
+risk	3
+resigned.	3
+purchases.	3
+posters	3
+planned	3
+passed	3
+pamphlets)	3
+optimism.	3
+
+
+#################EXPORTING TO SQOOP#################
+
+#########DATABASE AND TABLE PREPARATION##########
+create database customer_reports;
+CREATE TABLE customer_reports.customer_frustration_level ( customernumber varchar(200), total_siverity
+float,frustration_level varchar(100) );
+
+sqoop export --connect jdbc:mysql://localhost/customer_reports --username root --password Root123$ --table customer_frustration_level --export-dir /user/hduser/custmartfrustration/
+
+
+
+
+
+
